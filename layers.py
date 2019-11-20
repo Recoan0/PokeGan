@@ -7,7 +7,7 @@ class WeightedSum(Add):
         super().__init__(**kwargs)
         self.alpha = K.variable(alpha, name='ws_alpha')
 
-    # Merges the 2 layers, input 0 is the regular upscaling layer,
+    # Merges the 2 layers, input 0 is the regular up/downscaling layer,
     # input 1 is the new convolutional layer
     def _merge_function(self, inputs):
         assert(len(inputs) == 2)
