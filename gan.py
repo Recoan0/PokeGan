@@ -19,19 +19,40 @@ class GAN:
 
         self.composites = GAN._define_composite(self.discriminators, self.generators)
 
-    def generate_real_samples(self, n_samples):
+    def train_epochs(self, g_model, d_model, gan_model, n_epochs, n_batch, fadein = False):
+        batches_per_epoch = int(self.dataset.shape[0] / n_batch)
+        n_steps = batches_per_epoch * n_epochs
+        half_batch = int(batches_per_epoch / 2)
+
+        for i in range(n_steps):
+            if fadein:
+                GAN._update_fadein([g_model, d_model, gan_model], i, n_steps)
+
+            X_real, y_real = GAN._generate_real_samples(self.dataset, half_batch)
+            X_fake, y_fake = GAN._generate_fake_samples(self.dataset, half_batch)
+
+            # Update discriminator
+            d_loss1 = d_model.train_on_batch(X_real, y_real)
+            d_loss2 = d_model.train_on_batch(X_fake, y_fake)
+
+            # Update generator
+            z_input = GAN._generate_latent_points(self.latent_dim, n_batch)
+            y_real2 = np.ones((n_batch, 1))
+            
+
+    def _generate_real_samples(self, n_samples):
         indexes = np.random.randint(0, self.dataset.shape[0], n_samples)
         X = self.dataset[indexes]
         y = np.ones((n_samples, 1))
         return X, y
 
-    def generate_fake_samples(self, generator, n_samples):
+    def _generate_fake_samples(self, generator, n_samples):
         x_input = self.generate_latent_points(n_samples)
         X = generator.predict(x_input)
         y = -np.ones((n_samples, 1))
         return X, y
 
-    def generate_latent_points(self, n_samples):
+    def _generate_latent_points(self, n_samples):
         return np.random.randn((n_samples, self.latent_dim))
 
     @staticmethod
@@ -58,7 +79,7 @@ class GAN:
         return model_list
 
     @staticmethod
-    def update_fadein(models, step, n_steps):
+    def _update_fadein(models, step, n_steps):
         alpha = step / float(n_steps - 1)
         for model in models:
             for layer in model.layers:
