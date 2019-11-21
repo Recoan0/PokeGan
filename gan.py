@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 
 from layers import WeightedSum, MinibatchStdDev, PixelNormalisation
@@ -6,14 +5,69 @@ from keras.initializers import RandomNormal
 from keras.constraints import max_norm
 from keras.optimizers import Adam
 from keras.layers import Input, Conv2D, LeakyReLU, AveragePooling2D, Flatten, Dense, UpSampling2D, Reshape
-from keras import Model
+from keras import Model, Sequential
 from keras import backend as K
 
 
 class GAN:
-    def __init__(self, n_blocks, start_shape, latent_dim):
+    def __init__(self, dataset, n_blocks, start_shape, latent_dim):
+        self.dataset = dataset
+        self.start_shape = start_shape
+        self.latent_dim = latent_dim
         self.discriminators = Discriminator.define_discriminator(n_blocks, start_shape)
         self.generators = Generator.define_generator(latent_dim, n_blocks, start_shape)
+
+        self.composites = GAN._define_composite(self.discriminators, self.generators)
+
+    def generate_real_samples(self, n_samples):
+        indexes = np.random.randint(0, self.dataset.shape[0], n_samples)
+        X = self.dataset[indexes]
+        y = np.ones((n_samples, 1))
+        return X, y
+
+    def generate_fake_samples(self, generator, n_samples):
+        x_input = self.generate_latent_points(n_samples)
+        X = generator.predict(x_input)
+        y = -np.ones((n_samples, 1))
+        return X, y
+
+    def generate_latent_points(self, n_samples):
+        return np.random.randn((n_samples, self.latent_dim))
+
+    @staticmethod
+    def _define_composite(discriminators, generators):
+        model_list = []
+
+        for i in range(len(discriminators)):
+            gen_models, disc_models = generators[i], discriminators[i]
+
+            disc_models[0].trainable = False
+            straight_through_model = Sequential()
+            straight_through_model.add(gen_models[0])
+            straight_through_model.add(disc_models[0])
+            straight_through_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+
+            disc_models[1].trainable = False
+            fade_in_model = Sequential()
+            fade_in_model.add(gen_models[1])
+            fade_in_model.add(disc_models[1])
+            fade_in_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+
+            model_list.append([straight_through_model, fade_in_model])
+
+        return model_list
+
+    @staticmethod
+    def update_fadein(models, step, n_steps):
+        alpha = step / float(n_steps - 1)
+        for model in models:
+            for layer in model.layers:
+                if isinstance(layer, WeightedSum):
+                    K.set_value(layer.alpha, alpha)
+
+    @staticmethod
+    def wasserstein_loss(y_true, y_pred):
+        return K.mean(y_true * y_pred)
 
 
 class Discriminator:
@@ -38,7 +92,7 @@ class Discriminator:
         out_class = Dense(1)(d)
 
         model = Model(img_input, out_class)
-        model.compile(loss=Discriminator.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=1e-8))
+        model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
         model_list.append([model, model])
 
         # Create sub_models
@@ -75,8 +129,8 @@ class Discriminator:
             d = old_model.layers[i](d)
 
         # Model without fading, new block fully active
-        model1 = Model(img_input, d)
-        model1.compile(loss=Discriminator.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=1e-8))
+        straight_through_model = Model(img_input, d)
+        straight_through_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
         downsample = AveragePooling2D()(img_input)
         block_old = old_model.layers[1](downsample)
@@ -88,14 +142,10 @@ class Discriminator:
             d = old_model.layers[i](d)
 
         # Model with fading in, new block is slowly getting more influence over output
-        model2 = Model(img_input, d)
-        model2.compile(loss=Discriminator.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=1e-8))
+        fade_in_model = Model(img_input, d)
+        fade_in_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
-        return model1, model2
-
-    @staticmethod
-    def wasserstein_loss(y_true, y_pred):
-        return K.mean(y_true * y_pred)
+        return straight_through_model, fade_in_model
 
 
 class Generator:
@@ -147,13 +197,13 @@ class Generator:
 
         img_output_new = Conv2D(3, (1, 1), padding='same', kernel_initializer=weight_init, kernel_constraint=weight_constr)(g)
 
-        model1 = Model(old_model.input, img_output_new)
+        straight_through_model = Model(old_model.input, img_output_new)
 
         old_output = old_model.layers[-1]
         img_output_old = old_output(upsampling)
 
         merged = WeightedSum()([img_output_old, img_output_new])
 
-        model2 = Model(old_model.input, merged)
+        fade_in_model = Model(old_model.input, merged)
 
-        return model1, model2
+        return straight_through_model, fade_in_model
