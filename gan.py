@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib import pyplot as plt
 
 from layers import WeightedSum, MinibatchStdDev, PixelNormalisation
 from keras.initializers import RandomNormal
@@ -14,13 +15,66 @@ class GAN:
         self.dataset = dataset
         self.start_shape = start_shape
         self.latent_dim = latent_dim
-        self.discriminators = Discriminator.define_discriminator(n_blocks, start_shape)
-        self.generators = Generator.define_generator(latent_dim, n_blocks, start_shape)
+        self.discriminator_models = Discriminator.define_discriminator(n_blocks, start_shape)
+        self.generator_models = Generator.define_generator(latent_dim, n_blocks, start_shape)
 
-        self.composites = GAN._define_composite(self.discriminators, self.generators)
+        self.gan_models = GAN._define_composite(self.discriminator_models, self.generator_models)
 
-    def train_epochs(self, g_model, d_model, gan_model, n_epochs, n_batch, fadein = False):
-        batches_per_epoch = int(self.dataset.shape[0] / n_batch)
+    def train(self, e_norm, e_fadein, n_batch):
+        # Fit baseline model
+        g_normal, d_normal, gan_normal = self.generator_models[0][0], self.discriminator_models[0][0], self.gan_models[0][0]
+        gen_shape = g_normal.output_shape
+        scaled_data = self._scale_data(self.dataset, gen_shape[1:])
+        print('Scaled Data shape:', scaled_data.shape)
+
+        self._train_epochs(g_normal, d_normal, gan_normal, scaled_data, self.latent_dim, e_norm[0], n_batch[0])
+        self._summarize_performance('tuned', g_normal, self.latent_dim)
+
+        # Process each level of growth
+        for i in range(1, len(self.generator_models)):
+            g_normal, g_fadein = self.generator_models[i]
+            d_normal, d_fadein = self.discriminator_models[i]
+            gan_normal, gan_fadein = self.gan_models[i]
+
+            # Scale dataset
+            gen_shape = g_normal.output_shape
+            scaled_data = self._scale_data(self.dataset, gen_shape[1:])
+            print('Scaled Data shape:', scaled_data.shape)
+
+            # Train fade-in models
+            self._train_epochs(g_fadein, d_fadein, gan_fadein, scaled_data, self.latent_dim, e_fadein[i], n_batch[i], True)
+            self._summarize_performance('faded', g_fadein, self.latent_dim)
+
+            # Train straight through models
+            self._train_epochs(g_normal, d_normal, gan_normal, scaled_data, self.latent_dim, e_norm[i], n_batch[i])
+            self._summarize_performance('tuned', g_normal, self.latent_dim)
+
+
+    def _summarize_performance(self, status, g_model, n_samples=25):
+        gen_shape = g_model.output_shape
+        name = '%03dx%03d-%s' % (gen_shape[1], gen_shape[2], status)
+
+        X, _ = self._generate_fake_samples(g_model, self.latent_dim, n_samples)
+        X = (X - X.min()) / (X.max() - X.min())
+
+        square = int(np.sqrt(n_samples))
+        for i in range(n_samples):
+            plt.subplot(square, square, 1 + i)
+            plt.axis('off')
+            plt.imshow(X[i])
+
+        plot_filename = f'plot_{name}.png'
+        plt.savefig(plot_filename)
+        plt.close()
+
+        model_filename = f'model_{name}.h5'
+        g_model.save(model_filename)
+
+        print(f'>Saved: {plot_filename} and {model_filename}')
+
+    @staticmethod
+    def _train_epochs(g_model, d_model, gan_model, dataset, latent_dim, n_epochs, n_batch, fadein=False):
+        batches_per_epoch = int(dataset.shape[0] / n_batch)
         n_steps = batches_per_epoch * n_epochs
         half_batch = int(batches_per_epoch / 2)
 
@@ -28,32 +82,42 @@ class GAN:
             if fadein:
                 GAN._update_fadein([g_model, d_model, gan_model], i, n_steps)
 
-            X_real, y_real = GAN._generate_real_samples(self.dataset, half_batch)
-            X_fake, y_fake = GAN._generate_fake_samples(self.dataset, half_batch)
+            X_real, y_real = GAN._generate_real_samples(dataset, half_batch)
+            X_fake, y_fake = GAN._generate_fake_samples(g_model, latent_dim, half_batch)
 
             # Update discriminator
-            d_loss1 = d_model.train_on_batch(X_real, y_real)
-            d_loss2 = d_model.train_on_batch(X_fake, y_fake)
+            d_loss_real = d_model.train_on_batch(X_real, y_real)
+            d_loss_fake = d_model.train_on_batch(X_fake, y_fake)
 
             # Update generator
-            z_input = GAN._generate_latent_points(self.latent_dim, n_batch)
-            y_real2 = np.ones((n_batch, 1))
-            
+            z_input = GAN._generate_latent_points(latent_dim, n_batch)
+            y_update_to_real = np.ones((n_batch, 1))
+            g_loss = gan_model.train_on_batch(z_input, y_update_to_real)
 
-    def _generate_real_samples(self, n_samples):
-        indexes = np.random.randint(0, self.dataset.shape[0], n_samples)
-        X = self.dataset[indexes]
+            # Print loss this batch
+            print('>%d, d_real=%.3f, d_fake=%.3f g=%.3f' % (i + 1, d_loss_real, d_loss_fake, g_loss))
+
+    @staticmethod
+    def _generate_real_samples(dataset, n_samples):
+        indexes = np.random.randint(0, dataset.shape[0], n_samples)
+        X = dataset[indexes]
         y = np.ones((n_samples, 1))
         return X, y
 
-    def _generate_fake_samples(self, generator, n_samples):
-        x_input = self.generate_latent_points(n_samples)
+    @staticmethod
+    def _generate_fake_samples(generator, latent_dim, n_samples):
+        x_input = GAN._generate_latent_points(latent_dim, n_samples)
         X = generator.predict(x_input)
         y = -np.ones((n_samples, 1))
         return X, y
 
-    def _generate_latent_points(self, n_samples):
-        return np.random.randn((n_samples, self.latent_dim))
+    @staticmethod
+    def _generate_latent_points(latent_dim, n_samples):
+        return np.random.randn((n_samples, latent_dim))
+
+    @staticmethod
+    def _scale_data(data_list, new_shape):
+        return np.asarray(map(lambda data: np.reshape(data, new_shape), data_list))
 
     @staticmethod
     def _define_composite(discriminators, generators):
