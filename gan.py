@@ -49,7 +49,6 @@ class GAN:
             self._train_epochs(g_normal, d_normal, gan_normal, scaled_data, self.latent_dim, e_norm[i], n_batch[i])
             self._summarize_performance('tuned', g_normal, self.latent_dim)
 
-
     def _summarize_performance(self, status, g_model, n_samples=25):
         gen_shape = g_model.output_shape
         name = '%03dx%03d-%s' % (gen_shape[1], gen_shape[2], status)
