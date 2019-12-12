@@ -1,5 +1,5 @@
 # PokeGan
-Pokemon generation using a Generative Adversial Network.
+Pokemon generation using a Generative Adversarial Network.
 
 Current implementation of the GAN is a ProGan.
 
