@@ -8,7 +8,8 @@ class ImageLoader:
     def load_pokemon_dataset(pokemon_images_location):
         dataset = []
         for filename in os.listdir(pokemon_images_location):
-            img = cv2.imread(os.path.join(pokemon_images_location, filename))
+            img = cv2.imread(os.path.join(pokemon_images_location, filename), cv2.IMREAD_UNCHANGED)
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
             if img is not None:
                 dataset.append(img)
         dataset_array = np.asarray(dataset)

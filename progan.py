@@ -1,7 +1,5 @@
 import numpy as np
-import cv2
 from matplotlib import pyplot as plt
-import tensorflow as tf
 
 from layers import WeightedSum, MinibatchStdDev, PixelNormalisation
 from keras.initializers import RandomNormal
@@ -55,7 +53,7 @@ class GAN:
 
             # After every level of growth, show a batch of images to see progress
             picture_amount = 16
-            generated_pictures = list(g_normal.predict(self._generate_latent_points(self.latent_dim, picture_amount)))
+            generated_pictures = g_normal.predict(self._generate_latent_points(self.latent_dim, picture_amount))
             self._plot_generated(generated_pictures, picture_amount)
 
     def _summarize_performance(self, status, g_model, n_samples=25):
@@ -185,7 +183,7 @@ class GAN:
 
 class Discriminator:
     @staticmethod
-    def define_discriminator(n_blocks, input_shape=(4, 4, 1)):
+    def define_discriminator(n_blocks, input_shape=(4, 4, 3)):
         weight_init = RandomNormal(stddev=0.02)
         weight_constr = max_norm(1.0)
         model_list = []
@@ -263,7 +261,7 @@ class Discriminator:
 
 class Generator:
     @staticmethod
-    def define_generator(latent_dim, n_blocks, output_shape=(4, 4)):
+    def define_generator(latent_dim, n_blocks, output_shape=(4, 4, 3)):
         weight_init = RandomNormal(stddev=0.02)
         weight_constr = max_norm(1.0)
         model_list = []
@@ -280,7 +278,7 @@ class Generator:
         g = PixelNormalisation()(g)
         g = LeakyReLU(alpha=0.2)(g)
 
-        img_output = Conv2D(3, (1, 1), padding='same', kernel_initializer=weight_init, kernel_constraint=weight_constr)(g)
+        img_output = Conv2D(output_shape[-1], (1, 1), padding='same', kernel_initializer=weight_init, kernel_constraint=weight_constr)(g)
 
         model = Model(in_latent, img_output)
 
@@ -288,13 +286,13 @@ class Generator:
 
         for i in range(1, n_blocks):
             old_model = model_list[i - 1][0]
-            new_models = Generator._add_generator_block(old_model)
+            new_models = Generator._add_generator_block(old_model, output_shape)
             model_list.append(new_models)
 
         return model_list
 
     @staticmethod
-    def _add_generator_block(old_model):
+    def _add_generator_block(old_model, output_shape):
         weight_init = RandomNormal(stddev=0.02)
         weight_constr = max_norm(1.0)
 
@@ -308,7 +306,7 @@ class Generator:
         g = PixelNormalisation()(g)
         g = LeakyReLU(alpha=0.2)(g)
 
-        img_output_new = Conv2D(3, (1, 1), padding='same', kernel_initializer=weight_init, kernel_constraint=weight_constr)(g)
+        img_output_new = Conv2D(output_shape[-1], (1, 1), padding='same', kernel_initializer=weight_init, kernel_constraint=weight_constr)(g)
 
         straight_through_model = Model(old_model.input, img_output_new)
 
