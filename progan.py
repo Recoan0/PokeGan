@@ -1,13 +1,15 @@
+import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
 from layers import WeightedSum, MinibatchStdDev, PixelNormalisation
-from keras.initializers import RandomNormal
-from keras.constraints import max_norm
-from keras.optimizers import Adam
-from keras.layers import Input, Conv2D, LeakyReLU, AveragePooling2D, Flatten, Dense, UpSampling2D, Reshape
-from keras import Model, Sequential
-from keras import backend as K
+
+from tensorflow.keras.initializers import RandomNormal
+from tensorflow.keras.constraints import max_norm
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Input, Conv2D, LeakyReLU, AveragePooling2D, Flatten, Dense, UpSampling2D, Reshape
+from tensorflow.keras import Model, Sequential
+from tensorflow.keras import backend as K
 
 
 class GAN:
@@ -28,6 +30,9 @@ class GAN:
         gen_shape = g_normal.output_shape
         scaled_data = self._downscale_data(self.dataset, gen_shape[1:])
         print('Scaled Data shape:', scaled_data.shape)
+        plt.title(f'Scaled Data {scaled_data.shape}')
+        plt.imshow(scaled_data[600])
+        plt.show()
 
         self._train_epochs(g_normal, d_normal, gan_normal, scaled_data, self.latent_dim, e_norm[0], n_batch[0])
         self._summarize_performance('tuned', g_normal, self.latent_dim)
@@ -42,6 +47,9 @@ class GAN:
             gen_shape = g_normal.output_shape
             scaled_data = self._downscale_data(self.dataset, gen_shape[1:])
             print('Scaled Data shape:', scaled_data.shape)
+            plt.title(f'Scaled Data {scaled_data.shape}')
+            plt.imshow(scaled_data[600])
+            plt.show()
 
             # Train fade-in models
             self._train_epochs(g_fadein, d_fadein, gan_fadein, scaled_data, self.latent_dim, e_fadein[i], n_batch[i], True)
@@ -100,13 +108,16 @@ class GAN:
             g_loss = gan_model.train_on_batch(z_input, y_update_to_real)
 
             # Print loss this batch
-            print('>%d, d_real=%.3f, d_fake=%.3f g=%.3f' % (i + 1, d_loss_real, d_loss_fake, g_loss))
+            if not i % 10:
+                print('>%d, d_real=%.3f, d_fake=%.3f g=%.3f' % (i + 1, d_loss_real, d_loss_fake, g_loss))
 
             # Show image currently generated for constant latent vector by the generator
             if not i % batches_per_epoch:
-                print(f'Epoch {i // batches_per_epoch}')
-                image = g_model.predict(self.constant_latent_vector)
-                self._plot_generated(image, 1)
+                print(f'Epoch {i // batches_per_epoch} out of {n_epochs}')
+                if not i % (batches_per_epoch * 20):
+                    print('Image generated!')
+                    image = g_model.predict(self.constant_latent_vector)
+                    self._plot_generated(image, 1)
 
     @staticmethod
     def _generate_real_samples(dataset, n_samples):
@@ -128,7 +139,7 @@ class GAN:
 
     @staticmethod
     def _downscale_data(data_list, new_shape):
-        return np.asarray(list(map(lambda data: np.resize(data, new_shape), data_list)))
+        return np.asarray(list(map(lambda data: cv2.resize(data, new_shape[0:2], cv2.INTER_AREA), data_list)))
 
     @staticmethod
     def _define_composite(discriminators, generators):

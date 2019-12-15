@@ -1,5 +1,5 @@
-from keras.layers import Add, Layer
-from keras import backend as K
+from tensorflow.keras.layers import Add, Layer
+from tensorflow.keras import backend as K
 
 
 class WeightedSum(Add):
@@ -12,6 +12,13 @@ class WeightedSum(Add):
     def _merge_function(self, inputs):
         assert(len(inputs) == 2)
         return (1 - self.alpha) * inputs[0] + self.alpha * inputs[1]
+
+    def get_config(self):
+        config = super().get_config().copy()
+        config.update({
+            'alpha': self.alpha
+        })
+        return config
 
 
 class MinibatchStdDev(Layer):
