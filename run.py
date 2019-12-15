@@ -10,7 +10,7 @@ SCALE_TO_128 = False
 channels = 4 if USE_ALPHA else 3
 start_dimension = 4 if SCALE_TO_128 else 15
 n_blocks = 6 if SCALE_TO_128 else 4  # [4, 8, 16, 32 ,64 ,128] or [15, 30, 60, 120]
-n_batch = [64, 64, 32, 32, 16, 16] if SCALE_TO_128 else [64, 64, 128, 256]
+n_batch = [64, 64, 32, 32, 16, 16] if SCALE_TO_128 else [64, 64, 32, 16]
 n_epochs = [250, 250, 500, 500, 1000, 1000] if SCALE_TO_128 else [250, 250, 500, 1000]
 
 start_shape = (start_dimension, start_dimension, channels)

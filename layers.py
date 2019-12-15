@@ -16,7 +16,7 @@ class WeightedSum(Add):
     def get_config(self):
         config = super().get_config().copy()
         config.update({
-            'alpha': self.alpha
+            'alpha': K.get_value(self.alpha)
         })
         return config
 

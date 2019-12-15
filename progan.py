@@ -89,7 +89,7 @@ class GAN:
     def _train_epochs(self, g_model, d_model, gan_model, dataset, latent_dim, n_epochs, n_batch, fadein=False):
         batches_per_epoch = int(dataset.shape[0] / n_batch)
         n_steps = batches_per_epoch * n_epochs
-        half_batch = int(batches_per_epoch / 2)
+        half_batch = int(n_batch / 2)
 
         for i in range(n_steps):
             if fadein:
