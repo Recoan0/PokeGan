@@ -1,7 +1,9 @@
-import cv2
 import numpy as np
+import tensorflow as tf
 from matplotlib import pyplot as plt
 
+from gan import GAN
+from imageloader import ImageLoader
 from layers import WeightedSum, MinibatchStdDev, PixelNormalisation
 
 from tensorflow.keras.initializers import RandomNormal
@@ -12,17 +14,16 @@ from tensorflow.keras import Model, Sequential
 from tensorflow.keras import backend as K
 
 
-class GAN:
+class ProGAN(GAN):
     def __init__(self, dataset, n_blocks, start_shape, latent_dim):
-        self.dataset = dataset  # List of numpy arrays, not a numpy array
+        GAN.__init__(self, dataset, latent_dim)
         self.start_shape = start_shape
-        self.latent_dim = latent_dim
         self.discriminator_models = Discriminator.define_discriminator(n_blocks, start_shape)
         self.generator_models = Generator.define_generator(latent_dim, n_blocks, start_shape)
 
-        self.gan_models = GAN._define_composite(self.discriminator_models, self.generator_models)
+        self.gan_models = ProGAN._define_composite(self.discriminator_models, self.generator_models)
 
-        self.constant_latent_vector = GAN._generate_latent_points(self.latent_dim, 1)
+        self.constant_latent_vector = ProGAN._generate_latent_points(self.latent_dim, 1)
 
     def train(self, e_norm, e_fadein, n_batch):
         # Fit baseline model
@@ -64,28 +65,6 @@ class GAN:
             generated_pictures = g_normal.predict(self._generate_latent_points(self.latent_dim, picture_amount))
             self._plot_generated(generated_pictures, picture_amount)
 
-    def _summarize_performance(self, status, g_model, n_samples=25):
-        gen_shape = g_model.output_shape
-        name = '%03dx%03d-%s' % (gen_shape[1], gen_shape[2], status)
-
-        X, _ = self._generate_fake_samples(g_model, self.latent_dim, n_samples)
-        X = (X - X.min()) / (X.max() - X.min())
-
-        square = int(np.sqrt(n_samples))
-        for i in range(n_samples):
-            plt.subplot(square, square, 1 + i)
-            plt.axis('off')
-            plt.imshow(X[i])
-
-        plot_filename = f'plot_{name}.png'
-        plt.savefig(plot_filename)
-        plt.close()
-
-        model_filename = f'model_{name}.h5'
-        g_model.save(model_filename)
-
-        print(f'>Saved: {plot_filename} and {model_filename}')
-
     def _train_epochs(self, g_model, d_model, gan_model, dataset, latent_dim, n_epochs, n_batch, fadein=False):
         batches_per_epoch = int(dataset.shape[0] / n_batch)
         n_steps = batches_per_epoch * n_epochs
@@ -93,17 +72,17 @@ class GAN:
 
         for i in range(n_steps):
             if fadein:
-                GAN._update_fadein([g_model, d_model, gan_model], i, n_steps)
+                ProGAN._update_fadein([g_model, d_model, gan_model], i, n_steps)
 
-            X_real, y_real = GAN._generate_real_samples(dataset, half_batch)
-            X_fake, y_fake = GAN._generate_fake_samples(g_model, latent_dim, half_batch)
+            X_real, y_real = ProGAN._generate_real_samples(dataset, half_batch)
+            X_fake, y_fake = ProGAN._generate_fake_samples(g_model, latent_dim, half_batch)
 
             # Update discriminator
             d_loss_real = d_model.train_on_batch(X_real, y_real)
             d_loss_fake = d_model.train_on_batch(X_fake, y_fake)
 
             # Update generator
-            z_input = GAN._generate_latent_points(latent_dim, n_batch)
+            z_input = ProGAN._generate_latent_points(latent_dim, n_batch)
             y_update_to_real = np.ones((n_batch, 1))
             g_loss = gan_model.train_on_batch(z_input, y_update_to_real)
 
@@ -120,28 +99,6 @@ class GAN:
                     self._plot_generated(image, 1)
 
     @staticmethod
-    def _generate_real_samples(dataset, n_samples):
-        indexes = np.random.randint(0, dataset.shape[0], n_samples)
-        X = dataset[indexes]
-        y = np.ones((n_samples, 1))
-        return X, y
-
-    @staticmethod
-    def _generate_fake_samples(generator, latent_dim, n_samples):
-        x_input = GAN._generate_latent_points(latent_dim, n_samples)
-        X = generator.predict(x_input)
-        y = -np.ones((n_samples, 1))
-        return X, y
-
-    @staticmethod
-    def _generate_latent_points(latent_dim, n_samples):
-        return np.random.randn(n_samples, latent_dim)
-
-    @staticmethod
-    def _downscale_data(data_list, new_shape):
-        return np.asarray(list(map(lambda data: cv2.resize(data, new_shape[0:2], cv2.INTER_AREA), data_list)))
-
-    @staticmethod
     def _define_composite(discriminators, generators):
         model_list = []
 
@@ -152,13 +109,13 @@ class GAN:
             straight_through_model = Sequential()
             straight_through_model.add(gen_models[0])
             straight_through_model.add(disc_models[0])
-            straight_through_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+            straight_through_model.compile(loss=ProGAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
             disc_models[1].trainable = False
             fade_in_model = Sequential()
             fade_in_model.add(gen_models[1])
             fade_in_model.add(disc_models[1])
-            fade_in_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+            fade_in_model.compile(loss=ProGAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
             model_list.append([straight_through_model, fade_in_model])
 
@@ -171,25 +128,6 @@ class GAN:
             for layer in model.layers:
                 if isinstance(layer, WeightedSum):
                     K.set_value(layer.alpha, alpha)
-
-    @staticmethod
-    def _plot_generated(images, n_images):
-        # plot images
-        square = int(np.sqrt(n_images))
-        # normalize pixel values to the range [0,1]
-        images = (images - images.min()) / (images.max() - images.min())
-        for i in range(n_images):
-            # define subplot
-            plt.subplot(square, square, 1 + i)
-            # turn off axis
-            plt.axis('off')
-            # plot raw pixel data
-            plt.imshow(images[i])
-        plt.show()
-
-    @staticmethod
-    def wasserstein_loss(y_true, y_pred):
-        return K.mean(y_true * y_pred)
 
 
 class Discriminator:
@@ -214,7 +152,7 @@ class Discriminator:
         out_class = Dense(1)(d)
 
         model = Model(img_input, out_class)
-        model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        model.compile(loss=ProGAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
         model_list.append([model, model])
 
         # Create sub_models
@@ -252,7 +190,7 @@ class Discriminator:
 
         # Model without fading, new block fully active
         straight_through_model = Model(img_input, d)
-        straight_through_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        straight_through_model.compile(loss=ProGAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
         downsample = AveragePooling2D()(img_input)
         block_old = old_model.layers[1](downsample)
@@ -265,7 +203,7 @@ class Discriminator:
 
         # Model with fading in, new block is slowly getting more influence over output
         fade_in_model = Model(img_input, d)
-        fade_in_model.compile(loss=GAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
+        fade_in_model.compile(loss=ProGAN.wasserstein_loss, optimizer=Adam(lr=0.001, beta_1=0, beta_2=0.99, epsilon=10e-8))
 
         return straight_through_model, fade_in_model
 
@@ -329,3 +267,47 @@ class Generator:
         fade_in_model = Model(old_model.input, merged)
 
         return straight_through_model, fade_in_model
+
+
+class ProGANRunner:
+    USE_ALPHA = False
+    SCALE_TO_128 = False
+
+    def run(self):
+        channels = 4 if self.USE_ALPHA else 3
+        start_dimension = 4 if self.SCALE_TO_128 else 15
+        n_blocks = 6 if self.SCALE_TO_128 else 4  # [4, 8, 16, 32 ,64 ,128] or [15, 30, 60, 120]
+        n_batch = [64, 64, 32, 32, 16, 16] if self.SCALE_TO_128 else [64, 64, 32, 8]
+        n_epochs = [250, 250, 500, 500, 1000, 1000] if self.SCALE_TO_128 else [250, 250, 500, 1000]
+
+        start_shape = (start_dimension, start_dimension, channels)
+
+        latent_dim = 100
+        images_location = '/home/dustin/Documents/Projects/Python/PokeGan/images'
+        dataset = ImageLoader.load_pokemon_dataset(images_location, self.USE_ALPHA, self.SCALE_TO_128)
+
+        print(f'Loaded dataset with shape {len(dataset)}x{dataset[0].shape}')
+
+        plt.imshow(dataset[600])
+        plt.show()
+
+        # Prevent out of memory issue
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        print(gpus)
+        if gpus:
+            try:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as e:
+                print(e)
+
+        # Select eGPU if present
+        gpu_count = len(gpus)
+        device = '/GPU:1' if gpu_count > 1 else '/GPU:0'
+
+        with tf.device(device):
+            gan = ProGAN(dataset, n_blocks, start_shape, latent_dim)
+            gan.train(n_epochs, n_epochs, n_batch)
+
+
+ProGANRunner().run()
