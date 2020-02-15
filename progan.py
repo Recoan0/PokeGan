@@ -17,6 +17,7 @@ from tensorflow.keras import backend as K
 class ProGAN(GAN):
     def __init__(self, dataset, n_blocks, start_shape, latent_dim):
         GAN.__init__(self, dataset, latent_dim)
+
         self.start_shape = start_shape
         self.discriminator_models = Discriminator.define_discriminator(n_blocks, start_shape)
         self.generator_models = Generator.define_generator(latent_dim, n_blocks, start_shape)
